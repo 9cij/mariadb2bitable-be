@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "type": "data_connector",
+  "extraData": {
+    "disabledPeriodicSync": false,
+    "dataSourceConfigUiUri": "https://744f6daa-a9a7-4eb1-b457-897fdd02e47e-00-3n4csd59wd8v2.kirk.replit.dev/",
+    "initHeight": 600,
+    "initWidth": 600
+  },
+  "protocol": {
+    "type": "http",
+    "httpProtocol": {
+      "uris": [
+        {
+          "type": "tableMeta",
+          "uri": "/api/table_meta"
+        },
+        {
+          "type": "records",
+          "uri": "/api/records"
+        }
+      ]
+    }
+  }
+}
