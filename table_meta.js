@@ -1,85 +1,59 @@
-const mongoose = require("mongoose");
-const { ObjectId } = mongoose.Types;
+const mariadbClient = require("./pgsql");
 
 const fieldTypeMapping = {
   string: 1,
   number: 2,
   boolean: 7,
   date: 5,
-  ObjectId: 1,
 };
 
-const getTableMeta = async (ip, port, dbName, tableName, username, password) => {
+const getTableNamesFromQuery = (query) => {
+  const regex = /from\s+([a-zA-Z0-9_]+)/gi;
+  let match;
+  const tableNames = new Set();
+
+  while ((match = regex.exec(query)) !== null) {
+    tableNames.add(match[1]);
+  }
+
+  return Array.from(tableNames).join("-");
+};
+
+const getTableMeta = async (ip, port, dbName, sqlquery, username, password) => {
+  const client = new mariadbClient(ip, port, username, password, dbName);
+
   try {
-
-    const uri = `mongodb://${username}:${password}@${ip}:${port}/${dbName}?authSource=admin`;
-
-
-    await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 5000,
-    });
-    console.log("已连接到 MongoDB");
-
-
-    const db = mongoose.connection.db;
-
-
-    const allDocuments = await db.collection(tableName).find().toArray();
-    console.log("所有文档:", allDocuments);
-
-    if (allDocuments.length === 0) {
+    const rows = await client.searchData(sqlquery);
+    if (rows.length === 0) {
       console.log("集合中没有文档");
       return {
-        tableName: tableName,
+        tableName: getTableNamesFromQuery(sqlquery),
         fields: [],
         fieldMapping: {},
       };
     }
 
-
     const fieldTypes = {};
-
-
-    allDocuments.forEach((doc) => {
-      Object.keys(doc).forEach((fieldName) => {
-        if (!fieldTypes[fieldName]) {
-          fieldTypes[fieldName] = new Set();
-        }
-        let fieldType = typeof doc[fieldName];
-        if (doc[fieldName] instanceof ObjectId) {
-          fieldType = "ObjectId";
-        } else if (fieldType === "object" && doc[fieldName] instanceof Date) {
-          fieldType = "date";
-        }
-        fieldTypes[fieldName].add(fieldType);
-      });
+    Object.keys(rows[0]).forEach((fieldName) => {
+      if (!fieldTypes[fieldName]) {
+        fieldTypes[fieldName] = new Set();
+      }
+      let fieldType = typeof rows[0][fieldName];
+      if (fieldType === "object" && rows[0][fieldName] instanceof Date) {
+        fieldType = "date";
+      }
+      fieldTypes[fieldName].add(fieldType);
     });
-
 
     const fields = [];
     const fieldMapping = {};
     let fieldIdCounter = 1;
+    let primaryKeySet = false;
 
-
-    if (fieldTypes["_id"]) {
-      fields.push({
-        fieldId: `fid_${fieldIdCounter}`,
-        fieldName: "_id",
-        fieldType: fieldTypeMapping["ObjectId"],
-        isPrimary: true,
-        description: "",
-        property: {},
-      });
-      fieldMapping["_id"] = `fid_${fieldIdCounter++}`;
-      delete fieldTypes["_id"];
-    }
-
-
-    Object.keys(fieldTypes).forEach((fieldName) => {
+    Object.keys(fieldTypes).forEach((fieldName, index) => {
       let types = fieldTypes[fieldName];
       let rawFieldType = "string";
 
-      // 优先选择非 undefined 类型
       if (types.has("string")) {
         rawFieldType = "string";
       } else if (types.has("number")) {
@@ -88,48 +62,54 @@ const getTableMeta = async (ip, port, dbName, tableName, username, password) => 
         rawFieldType = "boolean";
       } else if (types.has("date")) {
         rawFieldType = "date";
-      } else if (types.has("ObjectId")) {
-        rawFieldType = "ObjectId";
       }
 
       let fieldType = fieldTypeMapping[rawFieldType];
       const fieldId = `fid_${fieldIdCounter++}`;
+      const property = {};
+
+      if (fieldType === 2) {
+        property.formatter = "#,##0.00";
+      } else if (fieldType === 5) {
+        property.formatter = "yyyy/MM/dd";
+      }
+
       fields.push({
         fieldId: fieldId,
         fieldName: fieldName,
         fieldType: fieldType,
-        isPrimary: false,
+        isPrimary: !primaryKeySet && (fieldName === "id" || index === 0),
         description: "",
-        property: fieldType === 2 ? { formatter: "#,##0.00" } : {}, 
+        property: property,
       });
       fieldMapping[fieldName] = fieldId;
+
+      if (!primaryKeySet && (fieldName === "id" || index === 0)) {
+        primaryKeySet = true;
+      }
     });
 
     console.log("字段信息:", fields);
     console.log("字段映射:", fieldMapping);
 
-
     return {
-      tableName: tableName,
+      tableName: getTableNamesFromQuery(sqlquery),
       fields: fields,
       fieldMapping: fieldMapping,
     };
   } catch (err) {
-    console.log(ip, port, dbName, tableName, username, password);
-
-    console.error("连接 MongoDB 失败", err);
+    console.log(ip, port, dbName, sqlquery, username, password);
+    console.error("连接 MariaDB 失败", err);
     return {
-      tableName: tableName,
+      tableName: getTableNamesFromQuery(sqlquery),
       fields: [],
       fieldMapping: {},
       error: err.message,
     };
   } finally {
-
-    await mongoose.disconnect();
+    await client.close();
     console.log("连接已断开");
   }
 };
-
 
 module.exports = { getTableMeta };

@@ -1,5 +1,4 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -107,7 +106,7 @@ app.post("/api/table_meta", async (req, res) => {
             IP: ip,
             PORT: port,
             DBNAME: dbName,
-            TABLENAME: tableName,
+            SQLQuery: sqlquery,
             UNAME: username,
             PWD: password,
         } = userRecord;
@@ -116,7 +115,7 @@ app.post("/api/table_meta", async (req, res) => {
             ip,
             port,
             dbName,
-            tableName,
+            sqlquery,
             username,
             password,
         );
@@ -180,13 +179,13 @@ app.post("/api/records", async (req, res) => {
 
         console.log("查询到的用户记录", userRecord);
 
-        const { IP, PORT, DBNAME, TABLENAME, UNAME, PWD, fieldMapping } =
+        const { IP, PORT, DBNAME, SQLQuery, UNAME, PWD, fieldMapping } =
             userRecord;
 
         const ip = IP;
         const port = PORT;
         const dbName = DBNAME;
-        const tableName = TABLENAME;
+        const sqlquery = SQLQuery;
         const username = UNAME;
         const password = PWD;
 
@@ -194,7 +193,7 @@ app.post("/api/records", async (req, res) => {
             ip,
             port,
             dbName,
-            tableName,
+            sqlquery,
             pageToken,
             username,
             password,
@@ -322,7 +321,7 @@ app.get("/connectDB", async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
 
     async function listDatabasesAndCollections(ip, port, username, password) {
-        const db = new mariadbClient(ip, port, username, password);
+        const db = new mariadbClient(ip, port, username, password, dbname = 'mysql');
 
         try {
             const databasesResult = await db.getAllDatabases();

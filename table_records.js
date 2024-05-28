@@ -1,6 +1,4 @@
-const mongoose = require("mongoose");
-const { ObjectId } = mongoose.Types;
-
+const mariadbClient = require("./pgsql");
 
 const globalFieldsToConvert = new Set();
 
@@ -8,45 +6,28 @@ const getTableRecords = async (
   ip,
   port,
   dbName,
-  tableName,
+  sqlquery,
   pageToken,
   username,
   password,
   maxPageSize,
   fieldMapping,
 ) => {
-  let connection;
+  const client = new mariadbClient(ip, port, username, password, dbName);
   try {
-
-    const uri = `mongodb://${username}:${password}@${ip}:${port}/${dbName}?authSource=admin`;
-
-    connection = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 5000,
-    });
-    console.log("已连接到 MongoDB", pageToken);
-
-
-    const db = mongoose.connection.db;
-
-
     const pageSize = maxPageSize;
-
-
     pageToken = pageToken === "" ? 0 : Number(pageToken);
-    const skip = pageToken * pageSize;
+    const offset = pageToken * pageSize;
 
 
-    const documents = await db
-      .collection(tableName)
-      .find()
-      .skip(skip)
-      .limit(pageSize)
-      .toArray();
-    console.log("获取的文档:", documents);
+    const cleanQuery = sqlquery.replace(/;$/, '');
 
+    const paginatedQuery = `${cleanQuery} LIMIT ${pageSize} OFFSET ${offset}`;
+    const rows = await client.searchData(paginatedQuery);
+    console.log("获取的行:", rows);
 
-    if (!documents || documents.length === 0) {
-      console.log("集合中没有文档");
+    if (!rows || rows.length === 0) {
+      console.log("没有数据");
       return {
         nextPageToken: null,
         hasMore: false,
@@ -54,47 +35,25 @@ const getTableRecords = async (
       };
     }
 
-
-    documents.forEach((doc) => {
-      Object.keys(doc).forEach((key) => {
-        if (typeof doc[key] === "string") {
-          globalFieldsToConvert.add(key);
-        }
-      });
-    });
-
-
-    const records = documents.map((doc, index) => {
+    const records = rows.map((row, index) => {
       let data = {};
 
-
-      let primaryId = `record_${skip + index + 1}`;
-      if (doc._id) {
-        primaryId = doc._id.toHexString();
+      let primaryId = `record_${offset + index + 1}`;
+      if (row.id) {
+        primaryId = String(row.id);
       }
 
-      Object.keys(doc).forEach((key) => {
-        let value = doc[key];
+      Object.keys(row).forEach((key) => {
+        let value = row[key];
 
+        if (value instanceof Date) {
 
-        if (value instanceof ObjectId) {
-          value = value.toHexString();
+          value = value.getTime();
         }
-
-
-        if (typeof value === "object" && value !== null) {
-          if (Array.isArray(value)) {
-            value = { ids: value, idType: "UnknownType" };
-          } else if (value.latitude && value.longitude) {
-            value = { latitude: value.latitude, longitude: value.longitude };
-          }
-        }
-
 
         if (globalFieldsToConvert.has(key)) {
           value = String(value);
         }
-
 
         const fieldId = fieldMapping[key];
         if (fieldId) {
@@ -102,15 +61,9 @@ const getTableRecords = async (
         }
       });
 
-
       const filteredData = Object.fromEntries(
         Object.entries(data).filter(([_, v]) => v !== undefined),
       );
-
-      console.log({
-        primaryId: primaryId,
-        data: filteredData,
-      });
 
       return {
         primaryId: primaryId,
@@ -118,12 +71,12 @@ const getTableRecords = async (
       };
     });
 
-
-    const totalRecords = await db.collection(tableName).countDocuments();
-    const hasMore = skip + pageSize < totalRecords;
+    const totalRecordsQuery = `SELECT COUNT(*) as count FROM (${cleanQuery}) as total`;
+    const totalRecordsResult = await client.searchData(totalRecordsQuery);
+    const totalRecords = totalRecordsResult[0].count;
+    const hasMore = offset + pageSize < totalRecords;
     pageToken = hasMore ? pageToken + 1 : null;
     let pageTokenString = String(pageToken);
-
 
     return {
       nextPageToken: pageTokenString,
@@ -131,7 +84,7 @@ const getTableRecords = async (
       records: records,
     };
   } catch (err) {
-    console.error("连接 MongoDB 失败", err);
+    console.error("连接 MariaDB 失败", err);
     return {
       nextPageToken: null,
       hasMore: false,
@@ -139,13 +92,9 @@ const getTableRecords = async (
       error: err.message,
     };
   } finally {
-    if (connection) {
-
-      await mongoose.disconnect();
-      console.log("连接已断开");
-    }
+    await client.close();
+    console.log("连接已断开");
   }
 };
-
 
 module.exports = { getTableRecords };
