@@ -39,9 +39,6 @@ const getTableRecords = async (
       let data = {};
 
       let primaryId = `record_${offset + index + 1}`;
-      if (row.id) {
-        primaryId = String(row.id);
-      }
 
       Object.keys(row).forEach((key) => {
         let value = row[key];
